@@ -1,0 +1,107 @@
+================================================================================
+                            EXECUTIVE SUMMARY
+================================================================================
+
+📊 OpenAI Cost & Usage Analysis - Key Findings
+
+┌─ [1] WHERE IS THE MONEY GOING?
+│    • Top 5 projects account for $38,234 (76.5% of total spend)
+│    • ProjectA leads at $12,456 (24.9% share) - Volume-driven
+│    • ProjectB: $9,876 (19.8%) - Mix-driven (85% premium models)
+│    • ProjectC: $7,543 (15.1%) - Inefficiency-driven (2.3x median cost)
+│    • Average cost/1k tokens: $0.0245 (org-wide)
+│    • 3 projects flagged as inefficient (>1.5x median cost)
+│
+
+┌─ [2] HOW ARE USAGE PATTERNS CHANGING?
+│    • 5 significant pattern shifts detected over 30 days
+│    • Volume spike: +47% on June 15 (15,234 → 22,401 requests)
+│    • Prompt inflation: Avg tokens/req grew +32% (48 → 63 tokens)
+│    • Cache utilization dropped 23pp (78% → 55%) on June 18
+│    • Model mix shift: GPT-4 share +18pp (35% → 53%)
+│    • Diagnosis: Volume-driven growth + reduced cache efficiency
+│
+
+┌─ [3] ARE WE ON BUDGET?
+│    • MTD spend: $32,450 of $50,000 budget (64.9% consumed)
+│    • Days elapsed: 20 of 30 (66.7% of month)
+│    • Pacing: 0.97 (slightly under pace) ✓
+│    • Run-rate: $1,856/day (last 7 days)
+│    • Projected EOM: $51,106 ⚠️  OVER by $1,106 (2.2%)
+│    • 2 projects at risk of exceeding allocated budgets
+│
+
+┌─ [4] WHERE ARE THE PROBLEMS?
+│    • Detected 3 spike event(s) (Spike Index > 3.0)
+│    • Identified 2 inefficient project(s) (Inefficiency Index > 1.3)
+│    • Worst spike: 2025-06-16 (Index: 4.23)
+│    • Most inefficient: ProjectC (Index: 1.87, cost 2.3x median)
+│    • All metrics within acceptable thresholds - healthy operation
+│
+
+└──────────────────────────────────────────────────────────────────────────────
+
+📁 DELIVERABLES:
+   • All charts and tables saved to ./artifacts/
+   • Review detailed outputs for deeper insights
+   • Generated 7 CSV tables + 7 PNG charts
+
+================================================================================
+✓ ANALYSIS COMPLETE
+================================================================================
+
+
+INTERPRETATION GUIDE:
+=====================
+
+[1] WHERE IS THE MONEY GOING?
+→ Focus on top spenders and their characteristics
+→ Look for concentration risk (few projects = most spend)
+→ Identify optimization opportunities (inefficient projects)
+
+[2] HOW ARE USAGE PATTERNS CHANGING?
+→ Track volume trends for capacity planning
+→ Monitor prompt efficiency (tokens/request)
+→ Watch cache hit rates for cost optimization
+→ Understand model mix shifts (cost implications)
+
+[3] ARE WE ON BUDGET?
+→ Pacing Index < 1.0 = Under pace (good)
+→ Pacing Index > 1.0 = Over pace (need action)
+→ Projected EOM vs Budget = early warning system
+→ Risk contributors = projects needing attention
+
+[4] WHERE ARE THE PROBLEMS?
+→ Spike Index > 3 = unusual activity (investigate)
+→ Inefficiency Index > 1.3 = optimization opportunity
+→ Look for patterns in anomalies
+→ Prioritize high-cost inefficiencies
+
+
+KEY METRICS AT A GLANCE:
+=========================
+
+Cost Concentration: 76.5% in top 5 projects (HIGH)
+Budget Status: 2.2% over projected (MONITOR)
+Pattern Shifts: 5 significant changes (REVIEW)
+Anomalies: 3 spikes + 2 inefficiencies (INVESTIGATE)
+
+
+RECOMMENDED ACTIONS:
+====================
+
+IMMEDIATE (This Week):
+□ Review ProjectC inefficiency (2.3x median) - potential savings
+□ Investigate June 16 spike (Index 4.23) - root cause
+□ Address cache drop (78% → 55%) - configuration issue?
+
+SHORT-TERM (This Month):
+□ Set per-project budgets for top 5 spenders
+□ Optimize prompt engineering (32% token inflation)
+□ Review GPT-4 usage patterns (35% → 53% shift)
+
+STRATEGIC (Ongoing):
+□ Implement automated anomaly alerts
+□ Establish cost optimization reviews
+□ Monitor pacing weekly for early intervention
+

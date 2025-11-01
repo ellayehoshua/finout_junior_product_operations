@@ -1,0 +1,5 @@
+type,date,entity,spike_index,requests_z,tokens_z,requests,tokens,inefficiency_index,cost_ratio,premium_share,cache_hit_rate,cost_usd
+Spike,2025-06-12 00:00:00+00:00,Organization,3.0808,3.0257,3.1359,18583644.0000,118221561339.0000,,,,,
+Spike,2025-06-13 00:00:00+00:00,Organization,3.3015,3.2991,3.3038,76047053.0000,900925907276.0000,,,,,
+Inefficiency,,proj_5,,,,,,3.2137,5.4273,1.0000,0.0000,23901.3412
+Inefficiency,,proj_4,,,,,,1.8146,2.6294,1.0000,0.0005,527.1592

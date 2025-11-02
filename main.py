@@ -761,7 +761,7 @@ def q1_drivers(df):
     INEFFICIENCY_THRESHOLD = 1.3  # 1.3x org median cost/1k
     
     def classify_driver(row, org_median, all_projects):
-        """Classify project as Volume, Mix, or Inefficiency driven."""
+        """Classify project as Volume or Inefficiency driven."""
         
         # Get percentile ranks for volume (tokens)
         if 'tokens' in row and pd.notna(row.get('tokens', np.nan)):
@@ -778,19 +778,8 @@ def q1_drivers(df):
         if cost_ratio >= INEFFICIENCY_THRESHOLD:
             return 'Inefficiency-driven'
         
-        # 2. Mix-driven: High premium usage with above-avg cost
-        if premium_pct >= MIX_THRESHOLD and cost_ratio > 1.0:
-            return 'Mix-driven'
-        
-        # 3. Volume-driven: High volume with reasonable costs
-        if volume_percentile >= VOLUME_THRESHOLD:
-            return 'Volume-driven'
-        
-        # 4. Mixed: Balanced profile
-        if premium_pct > org_avg_premium_pct:
-            return 'Mix-driven'
-        else:
-            return 'Volume-driven'
+        # 2. Volume-driven: Everything else (high or normal volume)
+        return 'Volume-driven'
     
     # Apply classification
     top5['driver_type'] = top5.apply(
@@ -844,7 +833,6 @@ def q1_drivers(df):
     # Color-code by driver type
     color_map = {
         'Volume-driven': COLOR_SECONDARY,
-        'Mix-driven': COLOR_WARNING,
         'Inefficiency-driven': COLOR_DANGER
     }
     
@@ -880,7 +868,6 @@ def q1_drivers(df):
     from matplotlib.patches import Patch
     legend_elements = [
         Patch(facecolor=color_map['Volume-driven'], alpha=0.8, label='Volume-driven'),
-        Patch(facecolor=color_map['Mix-driven'], alpha=0.8, label='Mix-driven'),
         Patch(facecolor=color_map['Inefficiency-driven'], alpha=0.8, label='Inefficiency-driven')
     ]
     ax.legend(handles=legend_elements, loc='lower right', fontsize=9)
@@ -1385,7 +1372,7 @@ def q2_usage_shifts(df):
             fill_value=0
         )
     
-    # 4. I/O Ratio (weighted by tokens)
+    # 4. I/O Ratio (weighted by tokens) + Input/Output tokens per request
     if 'io_ratio' in df.columns and 'tokens' in df.columns:
         df['io_weighted'] = df['io_ratio'] * df['tokens']
         daily_io_weighted = df.groupby('date')['io_weighted'].sum()
@@ -1395,6 +1382,37 @@ def q2_usage_shifts(df):
             daily_tokens,
             fill_value=np.nan
         )
+        
+        # Also calculate separate input and output tokens per request
+        if 'input_tokens' in df.columns and 'output_tokens' in df.columns and 'num_model_requests' in df.columns:
+            daily_input = df.groupby('date')['input_tokens'].sum()
+            daily_output = df.groupby('date')['output_tokens'].sum()
+            daily_requests = df.groupby('date')['num_model_requests'].sum()
+            
+            daily_metrics['input_tokens_per_req'] = safe_divide(daily_input, daily_requests, fill_value=np.nan)
+            daily_metrics['output_tokens_per_req'] = safe_divide(daily_output, daily_requests, fill_value=np.nan)
+    
+    # 4b. Unit Cost Metrics - cost per 1K tokens and cost per request
+    if 'cost_usd' in df.columns:
+        daily_cost = df.groupby('date')['cost_usd'].sum()
+        
+        # Cost per 1K tokens
+        if 'tokens' in df.columns:
+            daily_tokens = df.groupby('date')['tokens'].sum()
+            daily_metrics['cost_per_1k'] = safe_divide(
+                daily_cost * 1000,
+                daily_tokens,
+                fill_value=np.nan
+            )
+        
+        # Cost per request
+        if 'num_model_requests' in df.columns:
+            daily_requests = df.groupby('date')['num_model_requests'].sum()
+            daily_metrics['cost_per_req'] = safe_divide(
+                daily_cost,
+                daily_requests,
+                fill_value=np.nan
+            )
     
     # 5. Model Token Shares (Top 4 models)
     if 'model' in df.columns and 'tokens' in df.columns:
@@ -1485,22 +1503,155 @@ def q2_usage_shifts(df):
                     'diagnosis': 'Cache'
                 })
     
-    # 4. I/O Ratio changes (±20pp)
-    if 'io_ratio' in daily_df.columns:
-        io_dod = daily_df['io_ratio'].diff()
+    # 4. I/O Ratio changes with detailed scenario analysis
+    if ('io_ratio' in daily_df.columns and 
+        'input_tokens_per_req' in daily_df.columns and 
+        'output_tokens_per_req' in daily_df.columns):
         
-        for date, change in io_dod.items():
-            if pd.notna(change) and abs(change) > CACHE_IO_THRESHOLD:
-                flags.append({
-                    'date': date,
-                    'trigger': 'I/O Ratio Shift',
-                    'metric': 'io_ratio',
-                    'change': change,
-                    'value': daily_df.loc[date, 'io_ratio'],
-                    'diagnosis': 'Prompt'
-                })
+        # Calculate baselines
+        io_baseline = daily_df['io_ratio'].median()
+        input_baseline = daily_df['input_tokens_per_req'].median()
+        output_baseline = daily_df['output_tokens_per_req'].median()
+        
+        # Detect significant changes
+        for date in daily_df.index[7:]:  # Skip first week for WoW comparison
+            curr_io = daily_df.loc[date, 'io_ratio']
+            curr_input = daily_df.loc[date, 'input_tokens_per_req']
+            curr_output = daily_df.loc[date, 'output_tokens_per_req']
+            
+            prev_io = daily_df.loc[date - pd.Timedelta(days=7), 'io_ratio'] if (date - pd.Timedelta(days=7)) in daily_df.index else io_baseline
+            prev_input = daily_df.loc[date - pd.Timedelta(days=7), 'input_tokens_per_req'] if (date - pd.Timedelta(days=7)) in daily_df.index else input_baseline
+            prev_output = daily_df.loc[date - pd.Timedelta(days=7), 'output_tokens_per_req'] if (date - pd.Timedelta(days=7)) in daily_df.index else output_baseline
+            
+            if pd.notna(curr_io) and pd.notna(prev_io):
+                io_change_pct = (curr_io - prev_io) / prev_io if prev_io != 0 else 0
+                input_change_pct = (curr_input - prev_input) / prev_input if prev_input != 0 else 0
+                output_change_pct = (curr_output - prev_output) / prev_output if prev_output != 0 else 0
+                
+                # Only flag if I/O ratio changed significantly (>15%)
+                if abs(io_change_pct) > 0.15:
+                    # Determine scenario
+                    scenario = None
+                    explanation = None
+                    
+                    # Scenario 1: Ratio increases, input declines, output stable
+                    if io_change_pct > 0 and input_change_pct < -0.10 and abs(output_change_pct) < 0.10:
+                        scenario = 'Prompt Trimming'
+                        explanation = f'Input streamlined (↓{abs(input_change_pct)*100:.1f}%), output stable, ratio ↑{io_change_pct*100:.1f}%'
+                    
+                    # Scenario 2: Ratio increases, output rises, input stable
+                    elif io_change_pct > 0 and output_change_pct > 0.10 and abs(input_change_pct) < 0.10:
+                        scenario = 'Verbose Outputs'
+                        explanation = f'Output expanded (↑{output_change_pct*100:.1f}%), input stable, ratio ↑{io_change_pct*100:.1f}%'
+                    
+                    # Scenario 3: Ratio decreases, input rises, output stable
+                    elif io_change_pct < 0 and input_change_pct > 0.10 and abs(output_change_pct) < 0.10:
+                        scenario = 'Context Expansion'
+                        explanation = f'Input expanded (↑{input_change_pct*100:.1f}%), output stable, ratio ↓{abs(io_change_pct)*100:.1f}%'
+                    
+                    # Scenario 4: Ratio decreases, output falls
+                    elif io_change_pct < 0 and output_change_pct < -0.10:
+                        scenario = 'Stricter Outputs'
+                        explanation = f'Output constrained (↓{abs(output_change_pct)*100:.1f}%), ratio ↓{abs(io_change_pct)*100:.1f}%'
+                    
+                    # Generic change
+                    else:
+                        scenario = 'I/O Balance Shift'
+                        explanation = f'Ratio changed {io_change_pct*100:+.1f}% (input {input_change_pct*100:+.1f}%, output {output_change_pct*100:+.1f}%)'
+                    
+                    if scenario:
+                        flags.append({
+                            'date': date,
+                            'trigger': scenario,
+                            'metric': 'io_ratio',
+                            'change': io_change_pct,
+                            'value': curr_io,
+                            'input_change': input_change_pct,
+                            'output_change': output_change_pct,
+                            'explanation': explanation,
+                            'diagnosis': 'I/O Ratio'
+                        })
     
-    # 5. Model Mix shifts (≥20pp for any model)
+    # 5. Unit Cost shifts (±20% WoW) - indicates efficiency/pricing changes
+    if 'cost_per_1k' in daily_df.columns and 'cost_per_req' in daily_df.columns:
+        cost_1k_baseline = daily_df['cost_per_1k'].median()
+        cost_req_baseline = daily_df['cost_per_req'].median()
+        
+        for date in daily_df.index[7:]:  # Skip first week for WoW comparison
+            curr_cost_1k = daily_df.loc[date, 'cost_per_1k']
+            curr_cost_req = daily_df.loc[date, 'cost_per_req']
+            
+            prev_cost_1k = daily_df.loc[date - pd.Timedelta(days=7), 'cost_per_1k'] if (date - pd.Timedelta(days=7)) in daily_df.index else cost_1k_baseline
+            prev_cost_req = daily_df.loc[date - pd.Timedelta(days=7), 'cost_per_req'] if (date - pd.Timedelta(days=7)) in daily_df.index else cost_req_baseline
+            
+            if pd.notna(curr_cost_1k) and pd.notna(prev_cost_1k) and prev_cost_1k > 0:
+                cost_1k_change = (curr_cost_1k - prev_cost_1k) / prev_cost_1k
+                
+                # Flag significant unit cost changes (±20%)
+                if abs(cost_1k_change) > 0.20:
+                    # Determine likely cause based on other metrics
+                    explanation_parts = []
+                    likely_cause = "Unit Cost Shift"
+                    
+                    # Check if model mix changed
+                    model_mix_changed = False
+                    for model_col in [c for c in daily_df.columns if c.startswith('model_share_')]:
+                        if date in daily_df.index and (date - pd.Timedelta(days=7)) in daily_df.index:
+                            curr_share = daily_df.loc[date, model_col]
+                            prev_share = daily_df.loc[date - pd.Timedelta(days=7), model_col]
+                            if abs(curr_share - prev_share) > 0.10:
+                                model_mix_changed = True
+                                break
+                    
+                    # Check if tokens per request changed
+                    tokens_changed = False
+                    if 'avg_tokens_per_req' in daily_df.columns:
+                        if date in daily_df.index and (date - pd.Timedelta(days=7)) in daily_df.index:
+                            curr_tpr = daily_df.loc[date, 'avg_tokens_per_req']
+                            prev_tpr = daily_df.loc[date - pd.Timedelta(days=7), 'avg_tokens_per_req']
+                            if pd.notna(curr_tpr) and pd.notna(prev_tpr) and prev_tpr > 0:
+                                tpr_change = (curr_tpr - prev_tpr) / prev_tpr
+                                if abs(tpr_change) > 0.15:
+                                    tokens_changed = True
+                    
+                    # Check if cache rate changed
+                    cache_changed = False
+                    if 'cache_hit_rate' in daily_df.columns:
+                        if date in daily_df.index and (date - pd.Timedelta(days=7)) in daily_df.index:
+                            curr_cache = daily_df.loc[date, 'cache_hit_rate']
+                            prev_cache = daily_df.loc[date - pd.Timedelta(days=7), 'cache_hit_rate']
+                            if abs(curr_cache - prev_cache) > 0.15:
+                                cache_changed = True
+                    
+                    # Build explanation
+                    direction = "increased" if cost_1k_change > 0 else "decreased"
+                    explanation_parts.append(f"Cost/1K {direction} {abs(cost_1k_change)*100:.1f}%")
+                    
+                    if model_mix_changed:
+                        likely_cause = "Model Mix Impact"
+                        explanation_parts.append("likely due to model mix shift")
+                    elif tokens_changed:
+                        likely_cause = "Prompt Length Impact"
+                        explanation_parts.append("correlated with token/req change")
+                    elif cache_changed:
+                        likely_cause = "Caching Impact"
+                        explanation_parts.append("correlated with cache rate change")
+                    else:
+                        likely_cause = "Pricing/Efficiency Shift"
+                        explanation_parts.append("not volume-driven")
+                    
+                    flags.append({
+                        'date': date,
+                        'trigger': likely_cause,
+                        'metric': 'cost_per_1k',
+                        'change': cost_1k_change,
+                        'value': curr_cost_1k,
+                        'explanation': ', '.join(explanation_parts),
+                        'cost_per_req': curr_cost_req,
+                        'diagnosis': 'Unit Cost'
+                    })
+    
+    # 6. Model Mix shifts (≥20pp for any model)
     model_cols = [c for c in daily_df.columns if c.startswith('model_share_')]
     for model_col in model_cols:
         model_dod = daily_df[model_col].diff()
@@ -1662,7 +1813,164 @@ def q2_usage_shifts(df):
         plt.close()
         print(f"  ✓ Saved: {chart_path}")
     
-    # Chart 4: Model Token Shares with flags
+    # Chart 4: Input vs Output Tokens per Request
+    if ('input_tokens_per_req' in daily_df.columns and 
+        'output_tokens_per_req' in daily_df.columns):
+        
+        fig, ax1 = plt.subplots(figsize=(12, 6))
+        
+        # Prepare data
+        plot_df = daily_df.reset_index()
+        
+        # Create twin axis for output tokens
+        ax1_twin = ax1.twinx()
+        
+        # Plot input and output tokens
+        line1 = ax1.plot(plot_df['date'], plot_df['input_tokens_per_req'], 
+                        marker='o', markersize=5, linewidth=2.5, 
+                        color=COLOR_PRIMARY, label='Input Tokens/Req', alpha=0.8)
+        
+        line2 = ax1_twin.plot(plot_df['date'], plot_df['output_tokens_per_req'], 
+                             marker='s', markersize=5, linewidth=2.5, 
+                             color=COLOR_WARNING, label='Output Tokens/Req', alpha=0.8)
+        
+        # Labels and title
+        ax1.set_xlabel('Date', fontweight='bold')
+        ax1.set_ylabel('Input Tokens per Request', fontweight='bold', color=COLOR_PRIMARY)
+        ax1_twin.set_ylabel('Output Tokens per Request', fontweight='bold', color=COLOR_WARNING)
+        ax1.set_title('Input vs Output Tokens per Request', fontsize=14, fontweight='bold', pad=20)
+        
+        # Combine legends
+        lines = line1 + line2
+        labels = [l.get_label() for l in lines]
+        ax1.legend(lines, labels, loc='upper left', fontsize=10)
+        
+        # Styling
+        ax1.tick_params(axis='y', labelcolor=COLOR_PRIMARY)
+        ax1_twin.tick_params(axis='y', labelcolor=COLOR_WARNING)
+        ax1.grid(True, alpha=0.3)
+        
+        # Format X-axis to show dates
+        plt.xticks(rotation=45, ha='right')
+        fig.autofmt_xdate()
+        
+        plt.tight_layout()
+        
+        chart_path = f"{ARTIFACTS_DIR}/q2_io_ratio.png"
+        plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  ✓ Saved: {chart_path}")
+    
+    # Chart 5: Unit Cost Trends (Cost per 1K tokens)
+    if 'cost_per_1k' in daily_df.columns:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        
+        # Prepare data
+        plot_df = daily_df.reset_index()
+        
+        # Plot cost per 1K tokens
+        ax.plot(plot_df['date'], plot_df['cost_per_1k'], 
+                marker='o', markersize=5, linewidth=2.5, 
+                color=COLOR_DANGER, label='Cost per 1K Tokens', alpha=0.8)
+        
+        # Add median baseline
+        median_cost = daily_df['cost_per_1k'].median()
+        ax.axhline(y=median_cost, color='gray', linestyle='--', 
+                  alpha=0.5, linewidth=2, label=f'Median: ${median_cost:.4f}')
+        
+        # Labels and title
+        ax.set_xlabel('Date', fontweight='bold')
+        ax.set_ylabel('Cost per 1K Tokens ($)', fontweight='bold')
+        ax.set_title('Unit Cost Trends - Cost per 1K Tokens', 
+                    fontsize=14, fontweight='bold', pad=20)
+        
+        # Legend
+        ax.legend(loc='upper left', fontsize=10)
+        
+        # Styling
+        ax.grid(True, alpha=0.3)
+        
+        # Format X-axis to show dates
+        plt.xticks(rotation=45, ha='right')
+        fig.autofmt_xdate()
+        
+        plt.tight_layout()
+        
+        chart_path = f"{ARTIFACTS_DIR}/q2_unit_costs.png"
+        plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  ✓ Saved: {chart_path}")
+    
+    # Chart 5b: Top Unit Cost Changes Bar Chart
+    unit_cost_flags = [f for f in flags if f['diagnosis'] == 'Unit Cost']
+    if unit_cost_flags:
+        # Sort by absolute change magnitude and take top 10
+        sorted_flags = sorted(unit_cost_flags, key=lambda x: abs(x['change']), reverse=True)[:10]
+        
+        if sorted_flags:
+            fig, ax = plt.subplots(figsize=(12, 8))
+            
+            # Prepare data
+            dates = [f['date'].strftime('%Y-%m-%d') for f in sorted_flags]
+            changes = [f['change'] * 100 for f in sorted_flags]  # Convert to percentage
+            triggers = [f['trigger'] for f in sorted_flags]
+            costs = [f['value'] for f in sorted_flags]
+            
+            # Color code by trigger type
+            colors = []
+            for trigger in triggers:
+                if 'Model Mix' in trigger:
+                    colors.append('#F78251')  # Orange
+                elif 'Prompt Length' in trigger:
+                    colors.append('#F379AC')  # Pink
+                elif 'Caching' in trigger:
+                    colors.append('#7F7AFF')  # Purple
+                else:
+                    colors.append('#FFD632')  # Yellow
+            
+            # Create horizontal bar chart
+            bars = ax.barh(range(len(dates)), changes, color=colors, alpha=0.8, edgecolor='black', linewidth=1.5)
+            
+            # Customize
+            ax.set_yticks(range(len(dates)))
+            ax.set_yticklabels(dates, fontsize=10)
+            ax.set_xlabel('Change in Cost per 1K Tokens (%)', fontweight='bold', fontsize=11)
+            ax.set_ylabel('Date', fontweight='bold', fontsize=11)
+            ax.set_title('Top 10 Unit Cost Changes - Ranked by Impact', 
+                        fontsize=14, fontweight='bold', pad=20)
+            
+            # Add vertical line at 0
+            ax.axvline(x=0, color='black', linestyle='-', linewidth=1, alpha=0.3)
+            
+            # Add value labels on bars
+            for i, (bar, change, trigger, cost) in enumerate(zip(bars, changes, triggers, costs)):
+                # Position label at end of bar
+                x_pos = change + (2 if change > 0 else -2)
+                ha = 'left' if change > 0 else 'right'
+                
+                # Format label
+                label = f"{change:+.1f}% | {trigger}\n${cost:.4f}/1K"
+                ax.text(x_pos, i, label, va='center', ha=ha, fontsize=8.5, fontweight='bold')
+            
+            # Add legend for trigger types
+            from matplotlib.patches import Patch
+            legend_elements = [
+                Patch(facecolor='#F78251', edgecolor='black', label='Model Mix Impact'),
+                Patch(facecolor='#F379AC', edgecolor='black', label='Prompt Length Impact'),
+                Patch(facecolor='#7F7AFF', edgecolor='black', label='Caching Impact'),
+                Patch(facecolor='#FFD632', edgecolor='black', label='Pricing/Efficiency Shift')
+            ]
+            ax.legend(handles=legend_elements, loc='lower right', fontsize=9, framealpha=0.95)
+            
+            ax.grid(axis='x', alpha=0.3, linestyle='--')
+            plt.tight_layout()
+            
+            chart_path = f"{ARTIFACTS_DIR}/q2_top_unit_cost_changes.png"
+            plt.savefig(chart_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"  ✓ Saved: {chart_path}")
+    
+    # Chart 6: Model Token Shares with flags
     if model_cols:
         fig, ax = plt.subplots(figsize=(12, 5))
         
@@ -1736,11 +2044,24 @@ def q2_usage_shifts(df):
                 diagnosis_groups[diag] = []
             diagnosis_groups[diag].append(flag)
         
+        # Sort Unit Cost events by magnitude (largest impact first)
+        if 'Unit Cost' in diagnosis_groups:
+            diagnosis_groups['Unit Cost'] = sorted(
+                diagnosis_groups['Unit Cost'], 
+                key=lambda x: abs(x['change']), 
+                reverse=True
+            )
+        
         # Print by diagnosis type
-        for diag_type in ['Volume', 'Prompt', 'Cache', 'Mix']:
+        for diag_type in ['Volume', 'Prompt', 'I/O Ratio', 'Unit Cost', 'Cache', 'Mix']:
             if diag_type in diagnosis_groups:
                 events = diagnosis_groups[diag_type]
-                print(f"\n{diag_type.upper()} Changes ({len(events)} event(s)):")
+                
+                # Add "Top X" label for Unit Cost if showing subset
+                if diag_type == 'Unit Cost' and len(events) > 5:
+                    print(f"\n{diag_type.upper()} Changes (Top 5 of {len(events)} - ranked by impact):")
+                else:
+                    print(f"\n{diag_type.upper()} Changes ({len(events)} event(s)):")
                 
                 for event in events[:5]:  # Show top 5 per type
                     date_str = event['date'].strftime('%Y-%m-%d')
@@ -1755,6 +2076,41 @@ def q2_usage_shifts(df):
                         baseline = daily_df['avg_tokens_per_req'].mean() if 'avg_tokens_per_req' in daily_df.columns else 0
                         print(f"  • {date_str}: Avg tokens/req {direction} {abs(event['change'])*100:.1f}% "
                               f"from baseline {baseline:.0f} (to {event['value']:.0f} tokens)")
+                    
+                    elif diag_type == 'I/O Ratio':
+                        scenario = event['trigger']
+                        explanation = event.get('explanation', '')
+                        print(f"  • {date_str}: {scenario}")
+                        print(f"    → {explanation}")
+                        
+                        # Add interpretation based on scenario
+                        if 'Trimming' in scenario:
+                            print(f"    ⚡ Efficiency gain: Prompts streamlined through trimming/fewer examples")
+                        elif 'Verbose' in scenario:
+                            print(f"    ⚠️  Output expansion: Responses became more detailed (check instruction changes)")
+                        elif 'Expansion' in scenario:
+                            print(f"    📈 Context growth: Additional context/retrieval added to inputs")
+                        elif 'Stricter' in scenario:
+                            print(f"    ✅ Output constraint: Responses limited (e.g., JSON format, length limits)")
+                    
+                    elif diag_type == 'Unit Cost':
+                        trigger = event['trigger']
+                        explanation = event.get('explanation', '')
+                        cost_per_req = event.get('cost_per_req', 0)
+                        change_pct = event['change'] * 100
+                        print(f"  • {date_str}: {trigger} ({change_pct:+.1f}%)")
+                        print(f"    → {explanation}")
+                        print(f"    → Cost/1K: ${event['value']:.4f}, Cost/Req: ${cost_per_req:.4f}")
+                        
+                        # Add interpretation based on trigger
+                        if 'Model Mix' in trigger:
+                            print(f"    🔄 Model choice changed - affecting unit economics")
+                        elif 'Prompt Length' in trigger:
+                            print(f"    📝 Prompt/output length changed - affecting efficiency")
+                        elif 'Caching' in trigger:
+                            print(f"    💾 Cache utilization changed - affecting costs")
+                        else:
+                            print(f"    💰 Pricing or efficiency shift - not driven by volume alone")
                     
                     elif diag_type == 'Cache':
                         direction = 'increased' if event['change'] > 0 else 'decreased'
@@ -1781,12 +2137,17 @@ def q2_usage_shifts(df):
     prompt_count = len([f for f in flags if f['diagnosis'] == 'Prompt'])
     cache_count = len([f for f in flags if f['diagnosis'] == 'Cache'])
     mix_count = len([f for f in flags if f['diagnosis'] == 'Mix'])
+    io_ratio_count = len([f for f in flags if f['diagnosis'] == 'I/O Ratio'])
+    unit_cost_count = len([f for f in flags if f['diagnosis'] == 'Unit Cost'])
     
     # Key metrics
     total_days = len(daily_df)
     avg_requests = daily_df['requests'].mean() if 'requests' in daily_df.columns else 0
     avg_tpr = daily_df['avg_tokens_per_req'].mean() if 'avg_tokens_per_req' in daily_df.columns else 0
     avg_cache = daily_df['cache_hit_rate'].mean() if 'cache_hit_rate' in daily_df.columns else 0
+    avg_io_ratio = daily_df['io_ratio'].mean() if 'io_ratio' in daily_df.columns else 0
+    avg_cost_per_1k = daily_df['cost_per_1k'].mean() if 'cost_per_1k' in daily_df.columns else 0
+    avg_cost_per_req = daily_df['cost_per_req'].mean() if 'cost_per_req' in daily_df.columns else 0
     
     # Build summary
     exec_summary = f"""
@@ -1803,6 +2164,10 @@ def q2_usage_shifts(df):
         trigger_summary.append(f"{volume_count} volume spike(s)")
     if prompt_count > 0:
         trigger_summary.append(f"{prompt_count} prompt shift(s)")
+    if io_ratio_count > 0:
+        trigger_summary.append(f"{io_ratio_count} I/O ratio shift(s)")
+    if unit_cost_count > 0:
+        trigger_summary.append(f"{unit_cost_count} unit cost shift(s)")
     if cache_count > 0:
         trigger_summary.append(f"{cache_count} cache change(s)")
     if mix_count > 0:
@@ -1816,8 +2181,23 @@ def q2_usage_shifts(df):
     if avg_tpr > 0:
         exec_summary += f"\n  • Average tokens/req: {avg_tpr:,.0f}"
     
+    if avg_io_ratio > 0:
+        exec_summary += f", output/input ratio: {avg_io_ratio:.2f}"
+    
     if avg_cache > 0:
         exec_summary += f", cache hit rate: {avg_cache:.1%}"
+    
+    if avg_cost_per_1k > 0:
+        exec_summary += f"\n  • Unit costs: ${avg_cost_per_1k:.4f}/1K tokens, ${avg_cost_per_req:.4f}/request"
+    
+    # Add top unit cost change if available
+    if unit_cost_count > 0:
+        unit_cost_events = [f for f in flags if f['diagnosis'] == 'Unit Cost']
+        if unit_cost_events:
+            top_change = max(unit_cost_events, key=lambda x: abs(x['change']))
+            change_pct = abs(top_change['change']) * 100
+            direction = "increase" if top_change['change'] > 0 else "decrease"
+            exec_summary += f"\n  • Largest unit cost shift: {change_pct:.1f}% {direction} ({top_change['trigger']})"
     
     print(f"\n{'='*80}")
     print("✓ Q2 Analysis Complete")
@@ -2848,13 +3228,13 @@ def q4_anomalies(df):
         width = 0.6
         
         # Create stacked bars
-        p1 = ax.bar(x, cost_component, width, label='Cost Ratio (50%)', 
+        p1 = ax.bar(x, cost_component, width, label='Cost Ratio Component (weighted 50%)', 
                    color=COLOR_DANGER, alpha=0.8)
         p2 = ax.bar(x, premium_component, width, bottom=cost_component,
-                   label='Premium Usage (30%)', color=COLOR_WARNING, alpha=0.8)
+                   label='Premium Usage Component (weighted 30%)', color=COLOR_WARNING, alpha=0.8)
         p3 = ax.bar(x, cache_component, width, 
                    bottom=cost_component + premium_component,
-                   label='Cache Miss (20%)', color=COLOR_INFO, alpha=0.8)
+                   label='Cache Miss Component (weighted 20%)', color=COLOR_INFO, alpha=0.8)
         
         # Add threshold lines
         ax.axhline(y=1.3, color=COLOR_ACCENT, linestyle='--', linewidth=2,
@@ -2863,10 +3243,10 @@ def q4_anomalies(df):
                   label='Baseline (1.0)', alpha=0.6)
         
         # Formatting
-        ax.set_ylabel('Inefficiency Index', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Inefficiency Index (Contribution)', fontsize=12, fontweight='bold')
         ax.set_xlabel('Project', fontsize=12, fontweight='bold')
-        ax.set_title('Inefficiency Index Breakdown by Component', 
-                    fontsize=14, fontweight='bold')
+        ax.set_title('Inefficiency Index Breakdown by Component\nFormula: 0.5 × Cost Ratio + 0.3 × Premium Share + 0.2 × Cache Miss', 
+                    fontsize=13, fontweight='bold')
         ax.set_xticks(x)
         ax.set_xticklabels(projects, rotation=45, ha='right')
         ax.legend(loc='upper right', fontsize=10)
@@ -3256,7 +3636,6 @@ def main():
     """Main execution function."""
     print("\n" + "="*80)
     print("OpenAI COST & USAGE ANALYSIS")
-    print("Senior FinOps Data Engineer Tool")
     print("="*80)
     
     # Ask user for monthly budget

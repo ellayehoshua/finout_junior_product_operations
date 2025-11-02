@@ -101,24 +101,39 @@ Contribution to index: 0.2 × 0.95 = 0.19
 
 Based on your graph showing **Inefficiency Index = 3.21**:
 
-```
-Component 1 (Orange): Cost Ratio
-  - Contribution: ~2.7 (from the stacked bar)
-  - This means: 0.5 × Cost Ratio = 2.7
-  - Therefore: Cost Ratio = 5.4x the median!
+### Understanding the Stacked Bars
 
-Component 2 (Yellow): Premium Usage
-  - Contribution: ~0.3
-  - This means: 0.3 × Premium Share = 0.3
+**Important:** The bars show **contribution values**, not the percentages in the legend!
+- The (50%, 30%, 20%) are the **weights** used in the formula
+- The **bar heights** show the weighted contributions to the total index
+
+```
+Component 1 (Orange): Cost Ratio Component
+  - Bar height: ~2.7
+  - Calculation: 0.5 × Cost Ratio = 2.7
+  - Therefore: Cost Ratio = 5.4x the median cost!
+  - Weight used: 50%
+
+Component 2 (Yellow): Premium Usage Component
+  - Bar height: ~0.3
+  - Calculation: 0.3 × Premium Share = 0.3
   - Therefore: Premium Share = 100% (all premium models!)
+  - Weight used: 30%
 
-Component 3 (Blue): Cache Miss
-  - Contribution: ~0.21
-  - This means: 0.2 × (1 - Cache Hit Rate) = 0.21
-  - Therefore: Cache Miss Rate = 105% ≈ 100%
+Component 3 (Blue): Cache Miss Component
+  - Bar height: ~0.21
+  - Calculation: 0.2 × Cache Miss Rate = 0.21
+  - Therefore: Cache Miss Rate ≈ 100% (almost no caching!)
+  - Weight used: 20%
 
-Total: 2.7 + 0.3 + 0.21 = 3.21 ✓
+Total Index = 2.7 + 0.3 + 0.21 = 3.21 ✓
 ```
+
+### Reading the Chart
+
+- **Y-axis values** = Contribution to inefficiency index (can be > 1.0)
+- **Legend percentages** = Formula weights (always 50%, 30%, 20%)
+- **Total bar height** = Total inefficiency index for that project
 
 ---
 
@@ -183,5 +198,8 @@ Based on weights, focus on:
 ---
 
 This scoring system helps prioritize which projects need optimization and what to fix first! 🎯
+
+
+
 
 

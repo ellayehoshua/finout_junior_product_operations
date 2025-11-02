@@ -61,6 +61,9 @@ All outputs are saved to the `./artifacts` directory:
 2. **Q2**: Usage trends over time (small multiples)
    - Daily requests
    - Average tokens per request
+   - Output-to-input ratio analysis (with scenario detection)
+   - Unit cost trends (cost per 1K tokens, cost per request)
+   - Top 10 unit cost changes (ranked by impact)
    - Cache hit rate
    - Model token share
 3. **Q3**: Budget burn-up chart with projections
@@ -94,10 +97,47 @@ Configurable in `main.py` constants section:
 
 - **Request Spike**: +30% WoW or z-score > 3 (14-day baseline)
 - **Tokens/Req Shift**: ±20-25% sustained (3-day MA)
-- **I/O Ratio Shift**: ±20 percentage points vs monthly mean
+- **I/O Ratio Shift**: ±15% WoW with scenario analysis
 - **Cache Change**: ±20 percentage points DoD
 - **Model Mix Swing**: ±20 percentage points toward premium
 - **Inefficiency**: Unit cost ≥ 1.5× org median
+
+### Output-to-Input Ratio Scenarios
+
+The tool automatically detects and interprets I/O ratio changes:
+
+1. **Prompt Trimming** (Ratio ↑, Input ↓, Output stable)
+   - Prompts streamlined through trimming/fewer examples
+   - ⚡ Efficiency gain
+
+2. **Verbose Outputs** (Ratio ↑, Output ↑, Input stable)
+   - Responses became more detailed
+   - ⚠️ Check instruction changes or reporting mode
+
+3. **Context Expansion** (Ratio ↓, Input ↑, Output stable)
+   - Additional context/retrieval added
+   - 📈 Context growth from larger retrieval window
+
+4. **Stricter Outputs** (Ratio ↓, Output ↓)
+   - Responses constrained (e.g., JSON format, length limits)
+   - ✅ Output optimization
+
+### Unit Cost Trend Analysis
+
+Tracks cost efficiency over time (not volume-driven):
+
+- **Cost per 1K tokens**: Monitors pricing efficiency
+- **Cost per request**: Tracks request-level costs
+
+**Automated root cause detection:**
+1. **Model Mix Impact** - Model choice changes affecting unit economics
+2. **Prompt Length Impact** - Token/req changes affecting efficiency
+3. **Caching Impact** - Cache utilization changes affecting costs
+4. **Pricing/Efficiency Shift** - Pure efficiency changes (not volume-driven)
+
+This distinguishes between:
+- Volume increases (more requests) ≠ Cost problem
+- Unit cost increases (more expensive per token/request) = Efficiency issue
 
 ### Budget Tracking
 
